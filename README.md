@@ -19,17 +19,17 @@ CUDA_VISIBLE_DEVICES=0 bash scripts/serve_renderer.sh --cpu-offload
 
 ### 2. 在四卡机器跑完主流程
 
-配置自己的 Serper Key 和能够访问 `gemini-3.1-pro-preview` 的 OpenAI 兼容端点。若使用 Google 官方 Gemini API，其兼容端点如下。搜索、在线奖励和评测会消耗对应服务额度。
+配置自己的 Serper Key 和阿里云百炼 API Key。图像 KScore、程序充分性打分和经验提取都使用 `qwen3.7-flash-2026-07-15`，关闭思考模式。百炼华北 2（北京）的实时推理在单次输入不超过 32K 时，每百万 token 输入 ¥0.20、输出 ¥0.80。搜索和评审分别消耗相应服务的额度。[百炼 API Key](https://help.aliyun.com/zh/model-studio/get-api-key) · [官方计费](https://help.aliyun.com/zh/model-studio/model-pricing)
 
 ```bash
 bash scripts/setup.sh
 
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 export QWEN_SERVICE_URL=http://127.0.0.1:8001
-export JUDGE_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+export JUDGE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 read -rsp "Serper API key: " SERPER_API_KEY
 printf '\n'
-read -rsp "Gemini API key: " JUDGE_API_KEY
+read -rsp "Alibaba Cloud Model Studio API key: " JUDGE_API_KEY
 printf '\n'
 export SERPER_API_KEY JUDGE_API_KEY
 
@@ -37,6 +37,8 @@ bash scripts/run_all.sh --work /path/to/genevolve-work
 ```
 
 `setup.sh` 会拉取两个公开的固定提交，并在 `.venv` 中安装训练依赖。`run_all.sh` 依次运行 `prepare`、`sft`、`evolve` 和 `eval`。下载、模型和训练产物在 `--work` 指定的位置。Hugging Face 下载限流时可在本机配置自己的 `HF_TOKEN` 后重跑。
+
+默认使用北京公共域名。百炼工作空间有专属域名时，可通过 `JUDGE_BASE_URL` 指定对应的 OpenAI 兼容地址。[百炼接口说明](https://help.aliyun.com/zh/model-studio/qwen-vl-compatible-with-openai)
 
 各阶段也能单独启动。复用同一工作目录和参数，SFT 从已保存的 ZeRO-3 断点恢复，自进化从最近完整断点恢复，评测跳过已落盘的题目。
 
@@ -87,7 +89,7 @@ k_3(\ell)=\exp(-\ell)-1+\ell,\qquad
 \mathcal L=\mathcal L_{\mathrm{GRPO}}+2\mathcal L_{\mathrm{SDL}}.
 $$
 
-公开仓库的工具循环、参考图解析、生成客户端和 KScore 评分器由安装脚本原样取用。多轮 SFT 数据注册和标注检查沿用了已有复现工程的做法，其许可见 `LICENSES/stage1-MIT.txt`。[论文附录 B、C、F](https://arxiv.org/html/2605.21605v2)
+公开仓库的工具循环、参考图解析、生成客户端和 KScore 评分规则由安装脚本原样取用。评审模型改用 Qwen3.7 Flash，比较实验结果时应注明评审模型。多轮 SFT 数据注册和标注检查沿用了已有复现工程的做法，其许可见 `LICENSES/stage1-MIT.txt`。[论文附录 B、C、F](https://arxiv.org/html/2605.21605v2)
 
 ## 离线验证
 

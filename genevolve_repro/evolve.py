@@ -15,7 +15,7 @@ from .distributed import (
     copy_actor, export_policy, gather, initialize, latest, load_checkpoint, load_model,
     make_sharded_actor, max_count, restore_optimizer, restore_rng, save_checkpoint,
 )
-from .feedback import LiveFeedback, contrast_pair
+from .feedback import LiveFeedback, contrast_pair, judge_settings
 from .memory import Embedder, ExperienceBank
 from .objectives import advantages, choose_distillation_tokens, kl_reward, loss_terms
 from .policy import ActorScorer, make_agent, score_turn, teacher_prefix
@@ -135,7 +135,8 @@ def _loop(work, rank, size, device, limit):
     out = work / "evolve"
     out.mkdir(parents=True, exist_ok=True)
     final = out / "final"
-    contract = {"sources": source_lock(), "config": cfg, "world_size": size, "total_steps": total}
+    contract = {"sources": source_lock(), "config": cfg, "judge": judge_settings(cfg),
+                "world_size": size, "total_steps": total}
     if (out / "contract.json").is_file() and read_json(out / "contract.json") != contract:
         raise RuntimeError("This work directory has a different self-evolution configuration.")
     if rank == 0:

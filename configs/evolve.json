@@ -22,5 +22,7 @@
   "experience_capacity": 500,
   "save_every": 10,
   "keep_checkpoints": 2,
-  "judge_model": "gemini-3.1-pro-preview"
+  "judge_model": "qwen3.7-flash-2026-07-15",
+  "judge_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "judge_enable_thinking": false
 }

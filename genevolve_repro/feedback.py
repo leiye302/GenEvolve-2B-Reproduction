@@ -77,6 +77,22 @@ def parse_bundle(data):
     }
 
 
+def parse_text_score(data):
+    score = float(data["score"])
+    if score not in {0, 0.25, 0.5, 0.75, 1}:
+        raise ValueError("The text judge returned an invalid five-bin reward.")
+    return score, str(data.get("rationale", ""))
+
+
+def judge_settings(config):
+    base_url = os.environ.get("JUDGE_BASE_URL", "").strip() or config["judge_base_url"]
+    return {
+        "model": config["judge_model"],
+        "base_url": base_url.rstrip("/"),
+        "enable_thinking": config.get("judge_enable_thinking"),
+    }
+
+
 def make_renderer():
     from genevolve.generator import QwenImageEditServiceGenerator
 
@@ -104,20 +120,21 @@ class LiveFeedback:
         from openai import OpenAI
 
         self.cfg = config
-        self.model = config["judge_model"]
-        self.client = OpenAI(base_url=required_env("JUDGE_BASE_URL"),
+        self.judge = judge_settings(config)
+        self.client = OpenAI(base_url=self.judge["base_url"],
                              api_key=required_env("JUDGE_API_KEY"), timeout=90, max_retries=2)
         self.renderer = make_renderer()
         self.scorer = image_scorer()
         self.limiter = self.scorer.RateLimiter(80 / ranks)
 
     def score_image(self, example, output):
-        self.limiter.acquire()
-        messages = [
-            {"role": "system", "content": self.scorer.SYSTEM_PROMPT},
-            self.scorer._build_user_message(example.id, example.prompt, str(output), str(example.gt)),
-        ]
-        obj = self.scorer._call_llm_json(self.client, self.model, messages, max_try=4)
+        message = self.scorer._build_user_message(example.id, example.prompt, str(output), str(example.gt))
+        return self.judge_json(
+            self.scorer.SYSTEM_PROMPT, message["content"], self.scorer.LLM_MAX_TOKENS,
+            self.normalize_image_scores,
+        )
+
+    def normalize_image_scores(self, obj):
         required = {"faithfulness", "visual_correctness", "aesthetics"}
         if not required.issubset(obj) or not ({"text_accuracy", "text_accuracy_na"} & obj.keys()):
             raise ValueError("The image judge did not return the KScore fields.")
@@ -135,15 +152,32 @@ class LiveFeedback:
             "overall": round(0.1 * f + 0.4 * v + 0.4 * text + 0.1 * a, 2), "rationale": why,
         }
 
-    def judge_json(self, system, content, max_tokens):
-        self.limiter.acquire()
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": content}],
-            temperature=0.0,
-            max_tokens=max_tokens,
-        )
-        return self.scorer._parse_llm_json(response.choices[0].message.content or "")
+    def judge_json(self, system, content, max_tokens, validate):
+        extra_body = None
+        if self.judge["enable_thinking"] is not None:
+            extra_body = {"enable_thinking": self.judge["enable_thinking"]}
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": content}]
+        for attempt in range(3):
+            self.limiter.acquire()
+            response = self.client.chat.completions.create(
+                model=self.judge["model"],
+                messages=messages,
+                temperature=0.0,
+                max_tokens=max_tokens,
+                response_format={"type": "json_object"},
+                extra_body=extra_body,
+            )
+            try:
+                choice = response.choices[0]
+                if choice.finish_reason == "length":
+                    raise ValueError("The judge reached its output token limit.")
+                obj = self.scorer._parse_llm_json(choice.message.content or "")
+                if not isinstance(obj, dict):
+                    raise ValueError("Expected a JSON object from the judge.")
+                return validate(obj)
+            except (IndexError, KeyError, TypeError, ValueError) as error:
+                if attempt == 2:
+                    raise ValueError(f"{self.judge['model']} did not return a valid judgement.") from error
 
     def render(self, result, output):
         render_program(self.renderer, result, output)
@@ -161,14 +195,13 @@ class LiveFeedback:
                            for ref in result.reference_images],
             "tool_trace": result.messages,
         }
-        text = self.judge_json(TEXT_RUBRIC, json.dumps(program, ensure_ascii=False), max_tokens=4096)
-        score = float(text["score"])
-        if score not in {0, 0.25, 0.5, 0.75, 1}:
-            raise ValueError("The text judge returned an invalid five-bin reward.")
+        score, rationale = self.judge_json(
+            TEXT_RUBRIC, json.dumps(program, ensure_ascii=False), 4096, parse_text_score,
+        )
         alpha = self.cfg["text_reward_coef"]
         return Outcome(
             True, (1 - alpha) * image["overall"] + alpha * score, image, score,
-            str(text.get("rationale", "")), str(output),
+            rationale, str(output),
         )
 
     def summarize(self, example, best, worst):
@@ -189,7 +222,7 @@ class LiveFeedback:
                 {"type": "text", "text": f"{label} image"},
                 {"type": "image_url", "image_url": {"url": self.scorer._encode_image_to_data_url(path)}},
             ))
-        return parse_bundle(self.judge_json(EXPERIENCE_RUBRIC, parts, max_tokens=8192))
+        return self.judge_json(EXPERIENCE_RUBRIC, parts, 8192, parse_bundle)
 
 
 def contrast_pair(trajectories, outcomes, threshold):

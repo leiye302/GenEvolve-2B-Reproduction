@@ -31,7 +31,7 @@ def eval_flags(parser):
 
 def execute(args, work):
     if args.command in {"all", "evolve", "eval"}:
-        keys = ("WISE_API_KEY",) if getattr(args, "split", None) == "wise" else ("JUDGE_BASE_URL", "JUDGE_API_KEY")
+        keys = ("WISE_API_KEY",) if getattr(args, "split", None) == "wise" else ("JUDGE_API_KEY",)
         for key in ("SERPER_API_KEY", *keys):
             required_env(key)
     if args.command in {"prepare", "all"}:

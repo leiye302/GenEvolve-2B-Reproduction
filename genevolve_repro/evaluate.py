@@ -6,7 +6,7 @@ import torch.distributed as dist
 from .common import BENCH, RL, ROOT, jsonl, load_upstream, model_ready, read_json, required_env, write_json
 from .data import examples
 from .distributed import barrier, initialize, load_model
-from .feedback import LiveFeedback, image_scorer
+from .feedback import LiveFeedback, image_scorer, judge_settings
 from .policy import make_agent, valid_program
 
 
@@ -64,20 +64,22 @@ def _evaluate(work, policy, split, max_cases, rank, size, device):
     marker = policy / "completed.json"
     suffix = "" if max_cases is None else f"-{max_cases}-cases"
     folder = work / "eval" / f"{split}-{policy.name}{suffix}"
+    cfg = read_json(ROOT / "configs" / "evolve.json")
     contract = {
         "policy": str(policy), "split": split, "count": count,
         "checkpoint": read_json(marker) if marker.is_file() else None,
     }
+    if split != "wise":
+        contract["judge"] = judge_settings(cfg)
     lock = folder / "config.json"
     if lock.is_file() and read_json(lock) != contract:
-        raise RuntimeError(f"Evaluation in {folder} belongs to a different policy.")
+        raise RuntimeError(f"Evaluation in {folder} uses a different policy or judge. Archive it before rerunning.")
     if rank == 0:
         write_json(lock, contract)
     barrier()
     jobs = [(i, folder / "cases" / f"{i:05d}.json") for i in range(rank, count, size)]
     jobs = [(i, path) for i, path in jobs if not path.is_file()]
     if jobs:
-        cfg = read_json(ROOT / "configs" / "evolve.json")
         if split != "rl-val":
             # Use the released run_agent.py defaults for final benchmark inference.
             cfg.update(temperature=0.6, top_p=0.9)

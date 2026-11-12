@@ -80,12 +80,19 @@ class ScriptedPolicy:
 
 
 def mock_judge(request):
-    messages = json.loads(request.content)["messages"]
+    body = json.loads(request.content)
+    assert request.url.host == "dashscope.aliyuncs.com"
+    assert request.url.path == "/compatible-mode/v1/chat/completions"
+    assert body["model"] == "qwen3.7-flash-2026-07-15"
+    assert body["enable_thinking"] is False
+    assert body["response_format"] == {"type": "json_object"}
+    messages = body["messages"]
     instruction = messages[0]["content"]
     if instruction.startswith("Assess the sufficiency"):
         program = json.loads(messages[1]["content"])["program"]
         data = {"score": 1.0 if "gold bird" in program else 0.25, "rationale": "fixture"}
     elif instruction.startswith("Compare the best"):
+        assert sum(part["type"] == "image_url" for part in messages[1]["content"]) == 3
         data = {
             "retrieval_key": {"trigger": "When depicting birds", "source_prompt_summary": "Bird illustration"},
             "decision_guidance": {
@@ -94,6 +101,7 @@ def mock_judge(request):
             },
         }
     else:
+        assert sum(part["type"] == "image_url" for part in messages[1]["content"]) == 2
         data = {"faithfulness": 1, "visual_correctness": 1, "text_accuracy_na": True,
                 "aesthetics": 1, "rationale": "fixture"}
     return httpx.Response(200, json={
@@ -134,7 +142,7 @@ class PipelineTest(unittest.TestCase):
         reference.load_state_dict(actor.state_dict())
         optimizer = torch.optim.AdamW(actor.parameters(), lr=1e-3)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 2)
-        client = OpenAI(api_key="offline-fixture", base_url="https://fixture.invalid/v1",
+        client = OpenAI(api_key="offline-fixture", base_url=cfg["judge_base_url"],
                         http_client=httpx.Client(transport=httpx.MockTransport(mock_judge)))
         with tempfile.TemporaryDirectory() as directory, client:
             folder = Path(directory)
@@ -148,12 +156,15 @@ class PipelineTest(unittest.TestCase):
                 "text_search_tool": SimpleNamespace(call=lambda **_: "bird"),
                 "image_search_tool": SimpleNamespace(call=lambda **_: [{"title": "bird", "local_path": str(gt)}]),
             }
-            with TestClient(app_for(pipeline)) as renderer, patch("openai.OpenAI", return_value=client), \
-                    patch.dict(os.environ, {"JUDGE_BASE_URL": "https://fixture.invalid/v1",
+            with TestClient(app_for(pipeline)) as renderer, patch("openai.OpenAI", return_value=client) as client_factory, \
+                    patch.dict(os.environ, {"JUDGE_BASE_URL": "",
                                             "JUDGE_API_KEY": "offline-fixture",
                                             "QWEN_SERVICE_URL": "http://testserver"}), \
                     patch("requests.post", side_effect=lambda url, json, timeout: renderer.post(url, json=json)):
                 feedback = LiveFeedback(cfg, 1)
+                client_factory.assert_called_once_with(
+                    base_url=cfg["judge_base_url"], api_key="offline-fixture", timeout=90, max_retries=2,
+                )
                 feedback.limiter.min_interval = 0
                 agent = make_agent(ScriptedPolicy(["gold", "gray"]), tokenizer, "cpu", cfg, **tools)
                 group = gather_group(agent, feedback, case, folder / "rollouts", 2)
