@@ -40,6 +40,8 @@ bash scripts/run_all.sh --work /path/to/genevolve-work
 
 默认使用北京公共域名。百炼工作空间有专属域名时，可通过 `JUDGE_BASE_URL` 指定对应的 OpenAI 兼容地址。[百炼接口说明](https://help.aliyun.com/zh/model-studio/qwen-vl-compatible-with-openai)
 
+环境变量的脱敏模板在 [configs/services.env.example](configs/services.env.example)。
+
 各阶段也能单独启动。复用同一工作目录和参数，SFT 从已保存的 ZeRO-3 断点恢复，自进化从最近完整断点恢复，评测跳过已落盘的题目。
 
 ```bash
@@ -93,11 +95,15 @@ $$
 
 ## 离线验证
 
-本地小模型用假工具、渲染模型和 judge 响应，执行真实 token log-prob、GRPO/SDL 反向传播、权重更新、断点恢复、HF 导出和评分汇总。运行测试需要训练环境和 FastAPI。
+本地小模型用模拟的工具、渲染器和评审响应，执行真实 token log-prob、GRPO/SDL 反向传播、权重更新、断点恢复、HF 导出和评分汇总。使用 Bash 和 Python 3.11 可以在干净检出上运行 CPU 检查。
 
 ```bash
-.venv/bin/python -m pip install fastapi==0.121.1
-.venv/bin/python -m unittest discover -s tests -v
+GENEVOLVE_PYTHON=python3.11 bash scripts/setup.sh --sources-only
+python3.11 -m venv .venv-smoke
+source .venv-smoke/bin/activate
+python -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -r requirements-smoke.txt
+python -m unittest discover -s tests -v
 ```
 
 四卡 CUDA 全量训练和真实外部服务需在目标机器上运行。这里的 2B 设置与论文发布的 8B 分数对应不同模型。
