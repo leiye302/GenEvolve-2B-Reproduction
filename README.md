@@ -68,6 +68,8 @@ python run.py --work /path/to/genevolve-work eval
 
 评测配置保存渲染协议版本，旧版“无效程序直接计零”的缓存不能与新版混用；请先归档旧评测目录，再重新评测。模型、提示词、采样参数、评审模型、训练数据及 loss 均未因此改变。
 
+Actor 解码统一由 `genevolve_repro.actor_text.decode_actor_response` 执行：保留已注册的特殊 `<RETHINK>`，其余特殊控制 token 仍按原规则清理。训练 rollout、GenEvolve-Bench、`rl-val` 和 WISE 共用此路径；后续历史和逐题结果不会再丢掉已经生成的 marker。原始生成 token ID 不变，损失仍使用原始 ID，不新增 token、提示词或路由算法。不含特殊 marker 的输出保持原解码行为。新 rollout 记录解码版本，评测配置也锁定该版本；旧评测缓存需归档后重新评测，不能直接混用。已有训练进程不会被这个代码更新热切换或重启。
+
 ### 3. 评测原始 WISE
 
 WISE 使用旧版数据和论文指定的 `gpt-4o-2024-05-13` 判分。需要一个仍能提供该模型的端点。设置 `WISE_API_KEY`，若用兼容服务再设置 `WISE_BASE_URL`。
