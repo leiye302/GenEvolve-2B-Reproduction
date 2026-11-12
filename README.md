@@ -64,6 +64,10 @@ python run.py --work /path/to/genevolve-work eval
 
 需要检查 SFT 权重或少量题时，`eval` 支持 `--policy /path/to/genevolve-work/sft` 和 `--max-cases 4`。`eval --split rl-val` 使用公开的 600 条自进化验证样本。
 
+评测渲染直接调用固定版本的官方 `scripts/generate_images.py`：存在生成指令和至少一条实际存在的参考图路径时，使用 Actor 的方案；否则尝试以原始用户请求、无参考图生成，再按相同评分器评分。绘图后端若不支持无参考图，或生成仍失败，该题仍计零，不重试为另一个方案。逐题结果中的 `program_valid` 单独记录 Actor 原方案的有效性，`render_fallback`／`render_source` 标明是否使用回退，不能把回退生成成功算成 Actor 原方案有效。GenEvolve-Bench、`rl-val` 和 WISE 共用此规则；RL 训练中的无效程序零奖励和经验筛选规则不变。
+
+评测配置保存渲染协议版本，旧版“无效程序直接计零”的缓存不能与新版混用；请先归档旧评测目录，再重新评测。模型、提示词、采样参数、评审模型、训练数据及 loss 均未因此改变。
+
 ### 3. 评测原始 WISE
 
 WISE 使用旧版数据和论文指定的 `gpt-4o-2024-05-13` 判分。需要一个仍能提供该模型的端点。设置 `WISE_API_KEY`，若用兼容服务再设置 `WISE_BASE_URL`。
